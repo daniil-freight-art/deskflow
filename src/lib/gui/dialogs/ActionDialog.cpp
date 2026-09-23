@@ -14,6 +14,7 @@
 #include "common/KeySequence.h"
 #include "config/ServerConfig.h"
 
+#include <QRegularExpression>
 #include <QTimer>
 
 ActionDialog::ActionDialog(QWidget *parent, const ServerConfig &config, Hotkey &hotkey, Action &action)
@@ -28,7 +29,7 @@ ActionDialog::ActionDialog(QWidget *parent, const ServerConfig &config, Hotkey &
       ui->comboActionType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ActionDialog::actionTypeChanged
   );
   connect(ui->listScreens, &QListWidget::itemChanged, this, &ActionDialog::itemToggled);
-  connect(ui->lineCommand, &QLineEdit::textChanged, this, &ActionDialog::itemToggled);
+  connect(ui->lineScript, &QLineEdit::textChanged, this, &ActionDialog::itemToggled);
   connect(ui->buttonBox, &QDialogButtonBox::accepted, this, &ActionDialog::accept);
   connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &ActionDialog::reject);
 
@@ -37,7 +38,7 @@ ActionDialog::ActionDialog(QWidget *parent, const ServerConfig &config, Hotkey &
 
   ui->comboSwitchInDirection->setCurrentIndex(m_action.switchDirection());
   ui->comboLockCursorToScreen->setCurrentIndex(m_action.lockCursorMode());
-  ui->lineCommand->setText(m_action.command());
+  ui->lineScript->setText(m_action.script());
 
   ui->comboActionType->setCurrentIndex(m_action.type());
   ui->comboTriggerOn->setCurrentIndex(m_action.activeOnRelease());
@@ -64,7 +65,7 @@ ActionDialog::ActionDialog(QWidget *parent, const ServerConfig &config, Hotkey &
   ui->comboSwitchToScreen->setVisible(false);
   ui->comboSwitchInDirection->setVisible(false);
   ui->comboLockCursorToScreen->setVisible(false);
-  ui->lineCommand->setVisible(false);
+  ui->lineScript->setVisible(false);
 
   actionTypeChanged(ui->comboActionType->currentIndex());
 }
@@ -100,7 +101,7 @@ void ActionDialog::accept()
   m_action.setLockCursorMode(ui->comboLockCursorToScreen->currentIndex());
   m_action.setActiveOnRelease(ui->comboTriggerOn->currentIndex());
   m_action.setRestartServer(ui->comboActionType->currentIndex() == ActionTypes::RestartServer);
-  m_action.setCommand(ui->lineCommand->text().trimmed());
+  m_action.setScript(ui->lineScript->text().trimmed());
 
   QDialog::accept();
 }
@@ -133,7 +134,7 @@ void ActionDialog::actionTypeChanged(int index)
   ui->comboSwitchToScreen->setVisible(index == ActionTypes::SwitchTo);
   ui->comboSwitchInDirection->setVisible(index == ActionTypes::SwitchInDirection);
   ui->comboLockCursorToScreen->setVisible(index == ActionTypes::ModifyCursorLock);
-  ui->lineCommand->setVisible(index == ActionTypes::RunCommand);
+  ui->lineScript->setVisible(index == ActionTypes::RunScript);
   QTimer::singleShot(1, this, &ActionDialog::updateSize);
 }
 
@@ -153,10 +154,10 @@ bool ActionDialog::canSave() const
     }
     return (!ui->keySequenceWidget->keySequence().toString().isEmpty() && (totalChecked > 0));
   }
-  if (ui->comboActionType->currentIndex() == ActionTypes::RunCommand) {
-    // the server config parser treats ')' as the end of the arguments
-    const auto command = ui->lineCommand->text().trimmed();
-    return !command.isEmpty() && !command.contains(QLatin1Char(')'));
+  if (ui->comboActionType->currentIndex() == ActionTypes::RunScript) {
+    // must match InputFilter::RunScriptAction::isValidScriptName on the server
+    static const QRegularExpression s_pattern(QStringLiteral("^[A-Za-z0-9_-][A-Za-z0-9._-]*$"));
+    return s_pattern.match(ui->lineScript->text().trimmed()).hasMatch();
   }
   return true;
 }

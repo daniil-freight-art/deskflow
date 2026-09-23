@@ -941,18 +941,13 @@ void Config::parseAction(
     action = new InputFilter::RestartServer(mode);
   }
 
-  else if (name == "runCommand") {
-    if (args.empty() || (args.size() == 1 && args[0].empty())) {
-      throw ServerConfigReadException(s, "syntax for action: runCommand(command)");
+  else if (name == "runScript") {
+    if (args.size() != 1 || !InputFilter::RunScriptAction::isValidScriptName(args[0])) {
+      throw ServerConfigReadException(s, "syntax for action: runScript(name), name may only contain [A-Za-z0-9._-]");
     }
 
-    // commas split the command into several args, so join them back together
-    std::string command = args[0];
-    for (size_t i = 1; i < args.size(); ++i) {
-      command += "," + args[i];
-    }
-
-    action = new InputFilter::RunCommandAction(command);
+    const auto scriptsDir = QStringLiteral("%1/scripts").arg(Settings::settingsPath());
+    action = new InputFilter::RunScriptAction(args[0], scriptsDir.toStdString());
   }
 
   else if (name == "keyboardBroadcast") {

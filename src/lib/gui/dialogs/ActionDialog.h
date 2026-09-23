@@ -35,7 +35,7 @@ public:
     inline static const auto SwitchToNextScreen = 5;
     inline static const auto ModifyCursorLock = 6;
     inline static const auto RestartServer = 7;
-    inline static const auto RunCommand = 8;
+    inline static const auto RunScript = 8;
   };
 
   ActionDialog(QWidget *parent, const ServerConfig &config, Hotkey &hotkey, Action &action);

@@ -50,8 +50,8 @@ QString Action::text() const
     text.append(m_commandTemplate.arg(m_lockCursorModeNames.at(m_lockCursorMode)));
     break;
 
-  case Type::runCommand:
-    text.append(m_commandTemplate.arg(m_command));
+  case Type::runScript:
+    text.append(m_commandTemplate.arg(m_script));
     break;
 
   default:
@@ -85,7 +85,7 @@ void Action::loadSettings(QSettings &settings)
   setActiveOnRelease(settings.value(SettingsKeys::ActiveOnRelease, false).toBool());
   setHaveScreens(settings.value(SettingsKeys::HasScreens, false).toBool());
   setRestartServer(settings.value(SettingsKeys::RestartServer, false).toBool());
-  setCommand(settings.value(SettingsKeys::Command).toString());
+  setScript(settings.value(SettingsKeys::Script).toString());
 }
 
 void Action::saveSettings(QSettings &settings) const
@@ -106,7 +106,7 @@ void Action::saveSettings(QSettings &settings) const
   settings.setValue(SettingsKeys::ActiveOnRelease, m_activeOnRelease);
   settings.setValue(SettingsKeys::HasScreens, m_hasScreens);
   settings.setValue(SettingsKeys::RestartServer, m_restartServer);
-  settings.setValue(SettingsKeys::Command, m_command);
+  settings.setValue(SettingsKeys::Script, m_script);
 }
 
 int Action::type() const
@@ -168,14 +168,14 @@ bool Action::restartServer() const
   return m_restartServer;
 }
 
-const QString &Action::command() const
+const QString &Action::script() const
 {
-  return m_command;
+  return m_script;
 }
 
-void Action::setCommand(const QString &c)
+void Action::setScript(const QString &s)
 {
-  m_command = c;
+  m_script = s;
 }
 
 void Action::setKeySequence(const KeySequence &seq)

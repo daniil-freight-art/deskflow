@@ -20,7 +20,11 @@ private Q_SLOTS:
   void equalityCheck_diff_neighbours1();
   void equalityCheck_diff_neighbours2();
   void equalityCheck_diff_neighbours3();
-  void runCommandAction();
+  void runScriptAction_valid();
+  void runScriptAction_invalidNames();
+  void runScriptAction_unsafeScript();
+  void runScriptAction_symlink();
+  void runScriptAction_unsafeDirectory();
 
 private:
   Log m_log;

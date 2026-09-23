@@ -13,11 +13,19 @@
 #include "server/PrimaryClient.h"
 #include "server/Server.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QProcess>
+#include <QRegularExpression>
 
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+
+#ifndef Q_OS_WIN
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 // -----------------------------------------------------------------------------
 // Input Filter Condition Classes
@@ -267,40 +275,125 @@ void InputFilter::RestartServer::perform(const Event &)
   exit(0);
 }
 
-InputFilter::RunCommandAction::RunCommandAction(const std::string &command) : m_command(command)
+namespace {
+
+// checks that path is owned by the current user or root and that nobody else
+// can write to it, returns an empty string when it is safe
+QString unsafeReason(const QFileInfo &info)
+{
+#ifdef Q_OS_WIN
+  // ownership and mode bits do not map onto windows acls
+  Q_UNUSED(info)
+  return {};
+#else
+  const auto path = info.absoluteFilePath();
+  struct stat st{};
+  if (lstat(QFile::encodeName(path).constData(), &st) != 0) {
+    return QStringLiteral("%1 can not be read").arg(path);
+  }
+  if (st.st_uid != geteuid() && st.st_uid != 0) {
+    return QStringLiteral("%1 is owned by another user").arg(path);
+  }
+  // root owned sticky directories such as /tmp are fine, nobody else can
+  // rename or remove entries they do not own
+  const bool rootSticky = S_ISDIR(st.st_mode) && st.st_uid == 0 && (st.st_mode & S_ISVTX);
+  if ((st.st_mode & (S_IWGRP | S_IWOTH)) && !rootSticky) {
+    return QStringLiteral("%1 is writable by group or others").arg(path);
+  }
+  return {};
+#endif
+}
+
+} // namespace
+
+InputFilter::RunScriptAction::RunScriptAction(const std::string &script, const std::string &scriptsDir)
+    : m_script(script),
+      m_scriptsDir(scriptsDir)
 {
   // do nothing
 }
 
-std::string InputFilter::RunCommandAction::getCommand() const
+std::string InputFilter::RunScriptAction::getScript() const
 {
-  return m_command;
+  return m_script;
 }
 
-InputFilter::Action *InputFilter::RunCommandAction::clone() const
+std::string InputFilter::RunScriptAction::getScriptsDir() const
 {
-  return new RunCommandAction(*this);
+  return m_scriptsDir;
 }
 
-std::string InputFilter::RunCommandAction::format() const
+bool InputFilter::RunScriptAction::isValidScriptName(const std::string &name)
 {
-  return deskflow::string::sprintf("runCommand(%s)", m_command.c_str());
+  static const QRegularExpression s_pattern(QStringLiteral("^[A-Za-z0-9_-][A-Za-z0-9._-]*$"));
+  return s_pattern.match(QString::fromStdString(name)).hasMatch();
 }
 
-void InputFilter::RunCommandAction::perform(const Event &)
+InputFilter::Action *InputFilter::RunScriptAction::clone() const
 {
-  const auto command = QString::fromStdString(m_command);
-#ifdef Q_OS_WIN
-  const auto program = QStringLiteral("cmd.exe");
-  const QStringList args{QStringLiteral("/c"), command};
-#else
-  const auto program = QStringLiteral("/bin/sh");
-  const QStringList args{QStringLiteral("-c"), command};
+  return new RunScriptAction(*this);
+}
+
+std::string InputFilter::RunScriptAction::format() const
+{
+  return deskflow::string::sprintf("runScript(%s)", m_script.c_str());
+}
+
+void InputFilter::RunScriptAction::perform(const Event &)
+{
+  const auto fail = [this](const QString &reason) {
+    LOG_ERR("refusing to run script %s: %s", m_script.c_str(), qPrintable(reason));
+  };
+
+#ifndef Q_OS_WIN
+  if (geteuid() == 0) {
+    fail(QStringLiteral("deskflow is running as root"));
+    return;
+  }
 #endif
 
-  LOG_INFO("running command: %s", m_command.c_str());
-  if (!QProcess::startDetached(program, args)) {
-    LOG_ERR("failed to run command: %s", m_command.c_str());
+  if (!isValidScriptName(m_script)) {
+    fail(QStringLiteral("invalid script name"));
+    return;
+  }
+
+  // resolve symlinks in the directory path so the real location is checked
+  const auto dirPath = QDir(QString::fromStdString(m_scriptsDir)).canonicalPath();
+  if (dirPath.isEmpty()) {
+    fail(QStringLiteral("scripts directory %1 does not exist").arg(QString::fromStdString(m_scriptsDir)));
+    return;
+  }
+  const QDir dir(dirPath);
+  const QFileInfo script(dir.filePath(QString::fromStdString(m_script)));
+
+  if (script.isSymLink() || !script.isFile() || !script.isExecutable()) {
+    fail(QStringLiteral("%1 is not an executable regular file").arg(script.absoluteFilePath()));
+    return;
+  }
+
+  if (auto reason = unsafeReason(script); !reason.isEmpty()) {
+    fail(reason);
+    return;
+  }
+
+  // walk up to the root so nobody can swap out a parent directory
+  for (QFileInfo parent(dir.absolutePath());; parent = QFileInfo(parent.absolutePath())) {
+    if (!parent.isDir()) {
+      fail(QStringLiteral("%1 is not a directory").arg(parent.absoluteFilePath()));
+      return;
+    }
+    if (auto reason = unsafeReason(parent); !reason.isEmpty()) {
+      fail(reason);
+      return;
+    }
+    if (parent.isRoot()) {
+      break;
+    }
+  }
+
+  LOG_INFO("running script: %s", qPrintable(script.absoluteFilePath()));
+  if (!QProcess::startDetached(script.absoluteFilePath(), {}, dir.absolutePath())) {
+    fail(QStringLiteral("failed to start process"));
   }
 }
 

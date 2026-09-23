@@ -173,13 +173,20 @@ public:
     Mode m_mode;
   };
 
-  // RunCommandAction -- runs a shell command on the server machine
-  class RunCommandAction : public Action
+  // RunScriptAction -- runs an executable from the scripts directory on the
+  // server machine. no shell is involved and the script is only run when it
+  // and every directory above it are owned by the current user (or root) and
+  // are not writable by anyone else.
+  class RunScriptAction : public Action
   {
   public:
-    explicit RunCommandAction(const std::string &command);
+    RunScriptAction(const std::string &script, const std::string &scriptsDir);
 
-    std::string getCommand() const;
+    std::string getScript() const;
+    std::string getScriptsDir() const;
+
+    //! true if name is a plain file name that can be used with runScript
+    static bool isValidScriptName(const std::string &name);
 
     // Action overrides
     Action *clone() const override;
@@ -187,7 +194,8 @@ public:
     void perform(const Event &) override;
 
   private:
-    std::string m_command;
+    std::string m_script;
+    std::string m_scriptsDir;
   };
 
   // SwitchToScreenAction
