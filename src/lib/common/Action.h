@@ -29,7 +29,7 @@ struct SettingsKeys
   inline static const QString ActiveOnRelease = QStringLiteral("activeOnRelease");
   inline static const QString HasComputers = QStringLiteral("hasScreens");
   inline static const QString RestartServer = QStringLiteral("restartServer");
-  inline static const QString Command = QStringLiteral("command");
+  inline static const QString Script = QStringLiteral("script");
 };
 
 class Action
@@ -46,7 +46,7 @@ public:
     switchToNextComputer,
     lockCursorToComputer,
     restartAllConnections,
-    runCommand,
+    runScript,
     mouseDown,
     mouseUp,
     mousebutton,
@@ -102,8 +102,8 @@ public:
   bool restartServer() const;
   void setRestartServer(bool b);
 
-  const QString &command() const;
-  void setCommand(const QString &c);
+  const QString &script() const;
+  void setScript(const QString &s);
 
   bool operator==(const Action &a) const = default;
 
@@ -117,7 +117,7 @@ private:
   bool m_activeOnRelease = false;
   bool m_hasComputers = false;
   bool m_restartServer;
-  QString m_command = QString();
+  QString m_script = QString();
 
   inline static const QString m_commandTemplate = QStringLiteral("(%1)");
   inline static const QStringList m_actionTypeNames{
@@ -129,7 +129,7 @@ private:
       QStringLiteral("switchToNextScreen"),
       QStringLiteral("lockCursorToScreen"),
       QStringLiteral("restartServer"),
-      QStringLiteral("runCommand"),
+      QStringLiteral("runScript"),
       QStringLiteral("mouseDown"),
       QStringLiteral("mouseUp"),
       QStringLiteral("mousebutton")

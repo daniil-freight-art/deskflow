@@ -135,15 +135,15 @@ p, li { white-space: pre-wrap; }
         <translation type="unfinished">Cambiar a %1</translation>
     </message>
     <message>
-        <source>Run a command on this computer</source>
+        <source>Run a script on this computer</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Command or script path, e.g. ~/bin/my-script.sh</source>
+        <source>Script name, e.g. my-script.sh</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Runs on the server computer via the system shell. Must not contain &apos;)&apos;.</source>
+        <source>Runs an executable file from the scripts folder next to the Deskflow settings file (e.g. ~/.config/Deskflow/scripts). Only letters, digits, &apos;.&apos;, &apos;_&apos; and &apos;-&apos; are allowed. The script and its folders must not be writable by other users.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

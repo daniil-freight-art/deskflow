@@ -80,7 +80,7 @@
        </item>
        <item>
         <property name="text">
-         <string>Run a command on this computer</string>
+         <string>Run a script on this computer</string>
         </property>
        </item>
       </widget>
@@ -124,12 +124,12 @@
       </widget>
      </item>
      <item>
-      <widget class="QLineEdit" name="lineCommand">
+      <widget class="QLineEdit" name="lineScript">
        <property name="placeholderText">
-        <string>Command or script path, e.g. ~/bin/my-script.sh</string>
+        <string>Script name, e.g. my-script.sh</string>
        </property>
        <property name="toolTip">
-        <string>Runs on the server computer via the system shell. Must not contain ')'.</string>
+        <string>Runs an executable file from the scripts folder next to the Deskflow settings file (e.g. ~/.config/Deskflow/scripts). Only letters, digits, '.', '_' and '-' are allowed. The script and its folders must not be writable by other users.</string>
        </property>
       </widget>
      </item>

@@ -164,17 +164,101 @@ void ServerConfigTests::equalityCheck_diff_neighbours3()
   QVERIFY(a != b);
 }
 
-void ServerConfigTests::runCommandAction()
+namespace {
+
+// writes a script that creates a "marker" file in its working directory
+QString writeScript(const QTemporaryDir &dir, const QString &name, QFileDevice::Permissions permissions)
+{
+  const auto path = dir.filePath(name);
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly))
+    return {};
+  file.write("#!/bin/sh\necho ran > marker\n");
+  file.close();
+  file.setPermissions(permissions);
+  return path;
+}
+
+const auto kOwnerOnly = QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+
+} // namespace
+
+void ServerConfigTests::runScriptAction_valid()
 {
   QTemporaryDir dir;
   QVERIFY(dir.isValid());
-  const auto marker = dir.filePath(QStringLiteral("marker"));
+  QVERIFY(!writeScript(dir, QStringLiteral("my-script.sh"), kOwnerOnly).isEmpty());
 
-  InputFilter::RunCommandAction action(QStringLiteral("echo ran > \"%1\"").arg(marker).toStdString());
-  QCOMPARE(action.format(), "runCommand(" + action.getCommand() + ")");
+  InputFilter::RunScriptAction action("my-script.sh", dir.path().toStdString());
+  QCOMPARE(action.format(), "runScript(my-script.sh)");
 
   action.perform(Event());
-  QTRY_VERIFY(QFile::exists(marker));
+  QTRY_VERIFY(QFile::exists(dir.filePath(QStringLiteral("marker"))));
+}
+
+void ServerConfigTests::runScriptAction_invalidNames()
+{
+  QVERIFY(InputFilter::RunScriptAction::isValidScriptName("my-script.sh"));
+  QVERIFY(InputFilter::RunScriptAction::isValidScriptName("Backup_2"));
+
+  QVERIFY(!InputFilter::RunScriptAction::isValidScriptName(""));
+  QVERIFY(!InputFilter::RunScriptAction::isValidScriptName(".hidden"));
+  QVERIFY(!InputFilter::RunScriptAction::isValidScriptName(".."));
+  QVERIFY(!InputFilter::RunScriptAction::isValidScriptName("../evil"));
+  QVERIFY(!InputFilter::RunScriptAction::isValidScriptName("/bin/sh"));
+  QVERIFY(!InputFilter::RunScriptAction::isValidScriptName("a b"));
+  QVERIFY(!InputFilter::RunScriptAction::isValidScriptName("a;rm -rf ~"));
+  QVERIFY(!InputFilter::RunScriptAction::isValidScriptName("$(id)"));
+}
+
+void ServerConfigTests::runScriptAction_unsafeScript()
+{
+#ifdef Q_OS_WIN
+  QSKIP("permission checks are unix only");
+#endif
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QVERIFY(!writeScript(dir, QStringLiteral("shared.sh"), kOwnerOnly | QFileDevice::WriteOther).isEmpty());
+  QVERIFY(!writeScript(dir, QStringLiteral("not-executable.sh"), QFileDevice::ReadOwner).isEmpty());
+
+  InputFilter::RunScriptAction("shared.sh", dir.path().toStdString()).perform(Event());
+  InputFilter::RunScriptAction("not-executable.sh", dir.path().toStdString()).perform(Event());
+  InputFilter::RunScriptAction("missing.sh", dir.path().toStdString()).perform(Event());
+
+  QTest::qWait(500);
+  QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("marker"))));
+}
+
+void ServerConfigTests::runScriptAction_symlink()
+{
+#ifdef Q_OS_WIN
+  QSKIP("permission checks are unix only");
+#endif
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const auto target = writeScript(dir, QStringLiteral("target.sh"), kOwnerOnly);
+  QVERIFY(QFile::link(target, dir.filePath(QStringLiteral("link.sh"))));
+
+  InputFilter::RunScriptAction("link.sh", dir.path().toStdString()).perform(Event());
+
+  QTest::qWait(500);
+  QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("marker"))));
+}
+
+void ServerConfigTests::runScriptAction_unsafeDirectory()
+{
+#ifdef Q_OS_WIN
+  QSKIP("permission checks are unix only");
+#endif
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QVERIFY(!writeScript(dir, QStringLiteral("my-script.sh"), kOwnerOnly).isEmpty());
+  QVERIFY(QFile::setPermissions(dir.path(), kOwnerOnly | QFileDevice::WriteGroup | QFileDevice::ExeGroup));
+
+  InputFilter::RunScriptAction("my-script.sh", dir.path().toStdString()).perform(Event());
+
+  QTest::qWait(500);
+  QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("marker"))));
 }
 
 QTEST_MAIN(ServerConfigTests)
