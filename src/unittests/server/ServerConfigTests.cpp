@@ -9,6 +9,9 @@
 
 #include "server/Config.h"
 
+#include <QFile>
+#include <QTemporaryDir>
+
 class OnlySystemFilter : public InputFilter::Condition
 {
 public:
@@ -159,6 +162,19 @@ void ServerConfigTests::equalityCheck_diff_neighbours3()
   QVERIFY(b.addScreen("screenC"));
   QVERIFY(b.connect("screenA", Direction::Bottom, 0.0f, 0.5f, "screenC", 0.5f, 1.0f));
   QVERIFY(a != b);
+}
+
+void ServerConfigTests::runCommandAction()
+{
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const auto marker = dir.filePath(QStringLiteral("marker"));
+
+  InputFilter::RunCommandAction action(QStringLiteral("echo ran > \"%1\"").arg(marker).toStdString());
+  QCOMPARE(action.format(), "runCommand(" + action.getCommand() + ")");
+
+  action.perform(Event());
+  QTRY_VERIFY(QFile::exists(marker));
 }
 
 QTEST_MAIN(ServerConfigTests)

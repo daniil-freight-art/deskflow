@@ -941,6 +941,20 @@ void Config::parseAction(
     action = new InputFilter::RestartServer(mode);
   }
 
+  else if (name == "runCommand") {
+    if (args.empty() || (args.size() == 1 && args[0].empty())) {
+      throw ServerConfigReadException(s, "syntax for action: runCommand(command)");
+    }
+
+    // commas split the command into several args, so join them back together
+    std::string command = args[0];
+    for (size_t i = 1; i < args.size(); ++i) {
+      command += "," + args[i];
+    }
+
+    action = new InputFilter::RunCommandAction(command);
+  }
+
   else if (name == "keyboardBroadcast") {
     if (args.size() > 2) {
       throw ServerConfigReadException(s, "syntax for action: keyboardBroadcast([{off|on|toggle}[,screens]])");

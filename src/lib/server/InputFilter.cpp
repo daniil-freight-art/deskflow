@@ -13,6 +13,8 @@
 #include "server/PrimaryClient.h"
 #include "server/Server.h"
 
+#include <QProcess>
+
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -263,6 +265,43 @@ void InputFilter::RestartServer::perform(const Event &)
 {
   // HACK Super hack we should gracefully exit
   exit(0);
+}
+
+InputFilter::RunCommandAction::RunCommandAction(const std::string &command) : m_command(command)
+{
+  // do nothing
+}
+
+std::string InputFilter::RunCommandAction::getCommand() const
+{
+  return m_command;
+}
+
+InputFilter::Action *InputFilter::RunCommandAction::clone() const
+{
+  return new RunCommandAction(*this);
+}
+
+std::string InputFilter::RunCommandAction::format() const
+{
+  return deskflow::string::sprintf("runCommand(%s)", m_command.c_str());
+}
+
+void InputFilter::RunCommandAction::perform(const Event &)
+{
+  const auto command = QString::fromStdString(m_command);
+#ifdef Q_OS_WIN
+  const auto program = QStringLiteral("cmd.exe");
+  const QStringList args{QStringLiteral("/c"), command};
+#else
+  const auto program = QStringLiteral("/bin/sh");
+  const QStringList args{QStringLiteral("-c"), command};
+#endif
+
+  LOG_INFO("running command: %s", m_command.c_str());
+  if (!QProcess::startDetached(program, args)) {
+    LOG_ERR("failed to run command: %s", m_command.c_str());
+  }
 }
 
 InputFilter::SwitchToScreenAction::SwitchToScreenAction(IEventQueue *events, const std::string &screen)

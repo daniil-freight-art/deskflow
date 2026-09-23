@@ -173,6 +173,23 @@ public:
     Mode m_mode;
   };
 
+  // RunCommandAction -- runs a shell command on the server machine
+  class RunCommandAction : public Action
+  {
+  public:
+    explicit RunCommandAction(const std::string &command);
+
+    std::string getCommand() const;
+
+    // Action overrides
+    Action *clone() const override;
+    std::string format() const override;
+    void perform(const Event &) override;
+
+  private:
+    std::string m_command;
+  };
+
   // SwitchToScreenAction
   class SwitchToScreenAction : public Action
   {

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-2.0-only WITH LicenseRef-OpenSSL-Exception
  */
 
+#include "base/Log.h"
+
 #include <QTest>
 
 class ServerConfigTests : public QObject
@@ -18,4 +20,8 @@ private Q_SLOTS:
   void equalityCheck_diff_neighbours1();
   void equalityCheck_diff_neighbours2();
   void equalityCheck_diff_neighbours3();
+  void runCommandAction();
+
+private:
+  Log m_log;
 };

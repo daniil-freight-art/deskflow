@@ -78,6 +78,11 @@
          <string>Restart the server</string>
         </property>
        </item>
+       <item>
+        <property name="text">
+         <string>Run a command on this computer</string>
+        </property>
+       </item>
       </widget>
      </item>
     </layout>
@@ -116,6 +121,16 @@
          <string>Switch to the computer below</string>
         </property>
        </item>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="lineCommand">
+       <property name="placeholderText">
+        <string>Command or script path, e.g. ~/bin/my-script.sh</string>
+       </property>
+       <property name="toolTip">
+        <string>Runs on the server computer via the system shell. Must not contain ')'.</string>
+       </property>
       </widget>
      </item>
      <item>
