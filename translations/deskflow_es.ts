@@ -134,6 +134,18 @@ p, li { white-space: pre-wrap; }
         <source>Switch to %1</source>
         <translation type="unfinished">Cambiar a %1</translation>
     </message>
+    <message>
+        <source>Run a command on this computer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Command or script path, e.g. ~/bin/my-script.sh</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Runs on the server computer via the system shell. Must not contain &apos;)&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ClientConfigDialog</name>
