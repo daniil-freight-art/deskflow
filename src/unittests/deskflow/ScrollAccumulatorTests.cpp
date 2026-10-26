@@ -111,6 +111,27 @@ void ScrollAccumulatorTests::discreteAndSmoothInFrame_countedOnce()
   QCOMPARE(accumulator.endFrame().y, Click);
 }
 
+void ScrollAccumulatorTests::discreteEqualToPixels_fifteenPixelsPerClick()
+{
+  ScrollAccumulator accumulator;
+
+  // Hyprland reports a wheel notch as 15 pixels and repeats them as the discrete value
+  for (int i = 0; i < 3; ++i) {
+    accumulator.addSmooth(0.0, 15.0);
+    accumulator.addDiscrete(0, 15);
+    QCOMPARE(accumulator.endFrame().y, Click);
+  }
+
+  // a hi-res step of 1.875 pixels arrives truncated to 1, so 8 steps are 64 of 120
+  std::vector<int32_t> sent;
+  for (int i = 0; i < 8; ++i) {
+    accumulator.addSmooth(0.0, -1.0);
+    accumulator.addDiscrete(0, -1);
+    sent.push_back(accumulator.endFrame().y);
+  }
+  QCOMPARE(sent, std::vector<int32_t>({0, 0, 0, 0, 0, 0, 0, -Click}));
+}
+
 void ScrollAccumulatorTests::smoothOnly_tenPixelsPerClick()
 {
   ScrollAccumulator accumulator;

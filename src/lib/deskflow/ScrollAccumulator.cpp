@@ -43,7 +43,13 @@ ScrollDelta ScrollAccumulator::endFrame()
 
 int32_t ScrollAccumulator::Axis::endFrame(bool useDiscrete)
 {
-  const double delta = useDiscrete ? frameDiscrete : frameSmooth * s_unitsPerPixel;
+  double delta = frameSmooth * s_unitsPerPixel;
+  if (useDiscrete) {
+    // Hyprland repeats a wheel's pixel delta as its discrete value, so a
+    // discrete value equal to the pixel delta is pixels, not 120-based units
+    const bool discreteIsPixels = frameDiscrete != 0 && frameDiscrete == frameSmooth;
+    delta = discreteIsPixels ? frameSmooth * s_unitsPerWheelPixel : frameDiscrete;
+  }
   frameDiscrete = 0;
   frameSmooth = 0.0;
 

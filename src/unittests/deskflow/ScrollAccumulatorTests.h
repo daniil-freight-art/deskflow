@@ -18,6 +18,7 @@ private Q_SLOTS:
   void reversal_dropsLeftover();
   void wobble_doesNotScroll();
   void discreteAndSmoothInFrame_countedOnce();
+  void discreteEqualToPixels_fifteenPixelsPerClick();
   void smoothOnly_tenPixelsPerClick();
   void stop_dropsLeftoverAfterFrame();
   void stop_onlyAffectsItsAxis();

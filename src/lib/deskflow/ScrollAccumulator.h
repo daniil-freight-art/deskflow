@@ -21,7 +21,9 @@ namespace deskflow {
  *
  * Input is collected per hardware frame. A compositor may report the same
  * wheel step both as a discrete value and as a smooth pixel delta, so when a
- * frame has a discrete value its pixel delta is ignored.
+ * frame has a discrete value its pixel delta is ignored. Hyprland sends the
+ * pixel delta as the discrete value too, so when the two are equal the
+ * wheel is counted in pixels, 15 per click, as libinput does.
  *
  * A click is sent once half of it has been scrolled, so a short scroll
  * still moves. When the scroll direction reverses, whatever is left over
@@ -35,6 +37,8 @@ public:
   static constexpr int32_t s_unitsPerClick = 120;
   //! 10 pixels of smooth scroll make one wheel click
   static constexpr double s_unitsPerPixel = s_unitsPerClick / 10.0;
+  //! A wheel click is 15 pixels in libinput, for wheels reported in pixels
+  static constexpr double s_unitsPerWheelPixel = s_unitsPerClick / 15.0;
 
   //! Add a discrete scroll in 120-based units, a fraction or multiple of a click
   void addDiscrete(int32_t dx, int32_t dy);
