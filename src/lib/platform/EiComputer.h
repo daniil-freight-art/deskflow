@@ -125,6 +125,8 @@ private:
   void sendWheelEvents(ei_device *device, const int threshold, double dx, double dy, bool is_discrete);
   void onPointerScrollEvent(ei_event *event);
   void onPointerScrollDiscreteEvent(ei_event *event);
+  void onPointerScrollStopEvent(ei_event *event);
+  void onFrameEvent(ei_event *event);
   void onMotionEvent(ei_event *event);
   void onAbsMotionEvent(const ei_event *) const;
   bool onHotkey(KeyID key, bool isPressed, KeyModifierMask mask);

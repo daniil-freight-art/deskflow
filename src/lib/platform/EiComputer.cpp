@@ -15,6 +15,7 @@
 #include "deskflow/App.h"
 #include "deskflow/IComputer.h"
 #include "deskflow/OptionTypes.h"
+#include "deskflow/ScrollAccumulator.h"
 #include "platform/EiClipboard.h"
 #include "platform/EiEventQueueBuffer.h"
 #include "platform/EiKeyState.h"
@@ -29,18 +30,22 @@
 #include <unistd.h>
 #include <vector>
 
-// Smooth remainders are in fractional wheel-click units (1.0 == one full 120-unit click).
-// Discrete remainders are in wheel units (120 == one full click).
-// Keep these separate to avoid mixing units between the two handlers.
-struct ScrollRemainder
-{
-  double smoothX;
-  double smoothY;
-  double discreteX;
-  double discreteY;
-};
-
 namespace deskflow {
+
+namespace {
+
+// scroll from each device is collected in a ScrollAccumulator kept as its user data
+ScrollAccumulator *scrollAccumulator(ei_device *device)
+{
+  auto *accumulator = static_cast<ScrollAccumulator *>(ei_device_get_user_data(device));
+  if (!accumulator) {
+    accumulator = new ScrollAccumulator();
+    ei_device_set_user_data(device, accumulator);
+  }
+  return accumulator;
+}
+
+} // namespace
 
 EiComputer::EiComputer(bool isPrimary, IEventQueue *events, bool usePortal)
     : PlatformComputer{events},
@@ -152,7 +157,7 @@ void EiComputer::initEi()
 void EiComputer::cleanupEi()
 {
   for (auto device : m_eiDevices) {
-    delete static_cast<ScrollRemainder *>(ei_device_get_user_data(device));
+    delete static_cast<ScrollAccumulator *>(ei_device_get_user_data(device));
     ei_device_set_user_data(device, nullptr);
   }
 
@@ -676,7 +681,7 @@ void EiComputer::removeDevice(struct ei_device *device)
     updateButtons();
   }
 
-  delete static_cast<ScrollRemainder *>(ei_device_get_user_data(device));
+  delete static_cast<ScrollAccumulator *>(ei_device_get_user_data(device));
   ei_device_set_user_data(device, nullptr);
 
   for (auto it = m_eiDevices.begin(); it != m_eiDevices.end();) {
@@ -812,58 +817,23 @@ void EiComputer::onButtonEvent(ei_event *event)
 
 void EiComputer::onPointerScrollEvent(ei_event *event)
 {
-  // Smooth scroll deltas are in pixels. We accumulate them as fractional
-  // wheel-click units and only send full wheel clicks (120 units each)
-  // to the client. Sub-120 fractional clicks are silently ignored by
-  // compositors on the receiving end, so accumulating full clicks avoids
-  // flooding the network with events that the client drops anyway.
-  static const double s_wheelClicksPerPixel = 0.1; // 10 pixels == 1 full wheel click
+  // Smooth scroll deltas are in pixels. They are collected until the
+  // frame ends, then sent as whole wheel clicks (see onFrameEvent).
 
   assert(m_isPrimary);
 
   auto dx = ei_event_scroll_get_dx(event);
   auto dy = ei_event_scroll_get_dy(event);
-  struct ei_device *device = ei_event_get_device(event);
 
   LOG_VERBOSE("event: scroll (%.2f, %.2f)", dx, dy);
 
-  auto *remainder = static_cast<struct ScrollRemainder *>(ei_device_get_user_data(device));
-  if (!remainder) {
-    remainder = new ScrollRemainder();
-    ei_device_set_user_data(device, remainder);
-  }
-
-  // Accumulate smooth scroll as fractional wheel clicks (1.0 == 120 units)
-  double accX = remainder->smoothX + dx * s_wheelClicksPerPixel;
-  double accY = remainder->smoothY + dy * s_wheelClicksPerPixel;
-
-  // Only dispatch full wheel clicks. Use trunc (toward zero) not floor,
-  // because floor(-0.3) == -1 which would fire a spurious click.
-  double fullClicksX = std::trunc(accX);
-  double fullClicksY = std::trunc(accY);
-
-  // libei and deskflow seem to use opposite directions, so we have
-  // to send the opposite of the value reported by EI if we want to
-  // remain compatible with other platforms (including X11).
-  if (fullClicksX != 0 || fullClicksY != 0) {
-    sendEvent(
-        EventTypes::PrimaryComputerWheel,
-        WheelInfo::alloc(
-            static_cast<int32_t>(-fullClicksX) * s_scrollDelta, static_cast<int32_t>(-fullClicksY) * s_scrollDelta
-        )
-    );
-    accX -= fullClicksX;
-    accY -= fullClicksY;
-  }
-
-  remainder->smoothX = accX;
-  remainder->smoothY = accY;
+  scrollAccumulator(ei_event_get_device(event))->addSmooth(dx, dy);
 }
 
 void EiComputer::onPointerScrollDiscreteEvent(ei_event *event)
 {
   // both libei and deskflow use multiples of 120 to represent
-  // one scroll wheel click event
+  // one scroll wheel click event; hi-res wheels send fractions of it
 
   assert(m_isPrimary);
 
@@ -872,26 +842,42 @@ void EiComputer::onPointerScrollDiscreteEvent(ei_event *event)
 
   LOG_VERBOSE("event: scroll discrete (%d, %d)", dx, dy);
 
-  // accumulate fractional ticks, then emit 120 units at a time
-  struct ei_device *device = ei_event_get_device(event);
-  auto *remainder = static_cast<struct ScrollRemainder *>(ei_device_get_user_data(device));
-  if (!remainder) {
-    remainder = new ScrollRemainder();
-    ei_device_set_user_data(device, remainder);
-  }
+  scrollAccumulator(ei_event_get_device(event))->addDiscrete(dx, dy);
+}
 
-  double ax = remainder->discreteX + dx;
-  double ay = remainder->discreteY + dy;
-  auto cx = static_cast<int32_t>(ax / s_scrollDelta) * s_scrollDelta;
-  auto cy = static_cast<int32_t>(ay / s_scrollDelta) * s_scrollDelta;
-  remainder->discreteX = ax - cx;
-  remainder->discreteY = ay - cy;
+void EiComputer::onPointerScrollStopEvent(ei_event *event)
+{
+  assert(m_isPrimary);
+
+  auto x = ei_event_scroll_get_stop_x(event);
+  auto y = ei_event_scroll_get_stop_y(event);
+
+  LOG_VERBOSE("event: scroll stop (%d, %d)", x, y);
+
+  scrollAccumulator(ei_event_get_device(event))->stop(x, y);
+}
+
+void EiComputer::onFrameEvent(ei_event *event)
+{
+  // Scroll is only sent once the frame is complete, because a compositor
+  // may report one wheel step both as a discrete and as a smooth event.
+  // Only full wheel clicks are sent, as clients may drop or round up
+  // fractions of a click.
+  auto *device = ei_event_get_device(event);
+  if (!device)
+    return;
+
+  auto *accumulator = static_cast<ScrollAccumulator *>(ei_device_get_user_data(device));
+  if (!accumulator)
+    return;
+
+  const auto clicks = accumulator->endFrame();
 
   // libei and deskflow seem to use opposite directions, so we have
   // to send the opposite of the value reported by EI if we want to
   // remain compatible with other platforms (including X11).
-  if (cx != 0 || cy != 0)
-    sendEvent(EventTypes::PrimaryComputerWheel, WheelInfo::alloc(-cx, -cy));
+  if (clicks.x != 0 || clicks.y != 0)
+    sendEvent(EventTypes::PrimaryComputerWheel, WheelInfo::alloc(-clicks.x, -clicks.y));
 }
 
 void EiComputer::onMotionEvent(ei_event *event)
@@ -1034,6 +1020,7 @@ void EiComputer::handleSystemEvent(const Event &)
 
     // events below are for a receiver context (barriers)
     case EI_EVENT_FRAME:
+      onFrameEvent(event);
       break;
     case EI_EVENT_DEVICE_START_EMULATING:
       LOG_DEBUG("device %s started emulating", ei_device_get_name(device));
@@ -1067,6 +1054,7 @@ void EiComputer::handleSystemEvent(const Event &)
       break;
     case EI_EVENT_SCROLL_STOP:
     case EI_EVENT_SCROLL_CANCEL:
+      onPointerScrollStopEvent(event);
       break;
     default:
       break;

@@ -73,6 +73,8 @@ add_library(${lib_name} STATIC ${PLATFORM_CODE}
   ProtocolTypes.h
   ProtocolUtil.cpp
   ProtocolUtil.h
+  ScrollAccumulator.cpp
+  ScrollAccumulator.h
   ServerApp.cpp
   ServerApp.h
   StreamChunker.cpp
