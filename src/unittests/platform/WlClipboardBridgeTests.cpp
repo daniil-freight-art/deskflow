@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include <unistd.h>
+
 using deskflow::EiClipboard;
 using deskflow::WlClipboardBridge;
 using Format = IClipboard::Format;
@@ -26,17 +28,23 @@ using Format = IClipboard::Format;
 namespace {
 
 // Fake wl-clipboard commands backed by a directory: one file per mime plus a "types" listing.
+// Like wl-paste --watch, the watcher only reports a change once a copy has finished writing,
+// which it signals by creating a "changed" file.
 const QString kFileForMime = QStringLiteral("\"$0/$(printf %s \"$1\" | tr '/;=' '___')\"");
+const QString kSignalChange = QStringLiteral("; : > \"$0/changed\"");
 
 WlClipboardBridge::Commands fakeCommands(const QString &dir)
 {
   WlClipboardBridge::Commands commands;
   commands.list = {QStringLiteral("sh"), QStringLiteral("-c"), QStringLiteral("cat \"$0/types\""), dir};
   commands.paste = {QStringLiteral("sh"), QStringLiteral("-c"), QStringLiteral("cat ") + kFileForMime, dir};
-  commands.watch = {QStringLiteral("sh"), QStringLiteral("-c"), QStringLiteral("while sleep 0.05; do echo; done")};
+  commands.watch = {
+      QStringLiteral("sh"), QStringLiteral("-c"),
+      QStringLiteral("while sleep 0.05; do if [ -e \"$0/changed\" ]; then rm \"$0/changed\"; echo; fi; done"), dir
+  };
   commands.copy = {
       QStringLiteral("sh"), QStringLiteral("-c"),
-      QStringLiteral("printf '%s\\n' \"$1\" > \"$0/types\"; cat > ") + kFileForMime, dir
+      QStringLiteral("printf '%s\\n' \"$1\" > \"$0/types\"; cat > ") + kFileForMime + kSignalChange, dir
   };
   return commands;
 }
@@ -53,6 +61,12 @@ QString fileForMime(const QString &dir, QString mime)
   return dir + '/' + mime.replace('/', '_').replace(';', '_').replace('=', '_');
 }
 
+// Simulates a watch event without a clipboard change.
+void signalChange(const QString &dir)
+{
+  writeFile(dir + QStringLiteral("/changed"), {});
+}
+
 // Simulates a local copy offering the given formats.
 void copyLocally(const QString &dir, const std::vector<std::pair<QString, QByteArray>> &formats)
 {
@@ -62,6 +76,7 @@ void copyLocally(const QString &dir, const std::vector<std::pair<QString, QByteA
     types += mime.toUtf8() + '\n';
   }
   writeFile(dir + QStringLiteral("/types"), types);
+  signalChange(dir);
 }
 
 QByteArray pngImage()
@@ -124,6 +139,7 @@ void WlClipboardBridgeTests::localChange_htmlAndText_callbackReceivesBothOnce()
   bridge.start();
 
   // Content present before start is not a local grab.
+  signalChange(dir.path());
   QTest::qWait(300);
   QCOMPARE(received.count(), size_t{0});
 
@@ -133,6 +149,7 @@ void WlClipboardBridgeTests::localChange_htmlAndText_callbackReceivesBothOnce()
   QTRY_COMPARE_WITH_TIMEOUT(received.count(), size_t{1}, 3000);
 
   // Further watch events with unchanged content are ignored.
+  signalChange(dir.path());
   QTest::qWait(300);
   bridge.stop();
   QCOMPARE(received.count(), size_t{1});
@@ -183,6 +200,32 @@ void WlClipboardBridgeTests::setData_sameRemoteAfterLocalCopy_writesAgain()
   bridge.stop();
 
   QCOMPARE(bridge.readData().at(WlClipboardBridge::kMimeText), std::string{"remote"});
+}
+
+void WlClipboardBridgeTests::setData_openDescriptor_notInheritedByCopy()
+{
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  // Like deskflow's sockets, a pipe is not close-on-exec.
+  int fds[2];
+  QCOMPARE(::pipe(fds), 0);
+
+  auto commands = fakeCommands(dir.path());
+  commands.copy = {
+      QStringLiteral("sh"), QStringLiteral("-c"),
+      QStringLiteral("cat >/dev/null; if [ -e /dev/fd/%1 ]; then echo leaked; else echo closed; fi > \"$0/fd\"")
+          .arg(fds[1]),
+      dir.path()
+  };
+  WlClipboardBridge bridge([](const WlClipboardBridge::MimeData &) {}, commands);
+  bridge.setData(WlClipboardBridge::kMimeText, "remote");
+  ::close(fds[0]);
+  ::close(fds[1]);
+
+  QFile result(dir.filePath(QStringLiteral("fd")));
+  QVERIFY(result.open(QIODevice::ReadOnly));
+  QCOMPARE(result.readAll().trimmed(), QByteArray("closed"));
 }
 
 void WlClipboardBridgeTests::toClipboard_textHtmlPng_addsAllFormats()

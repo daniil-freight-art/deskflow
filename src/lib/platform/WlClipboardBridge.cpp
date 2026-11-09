@@ -32,6 +32,16 @@ QStringList withMime(QStringList command, const QString &mime)
   return command;
 }
 
+// Deskflow's sockets are not close-on-exec, and wl-copy leaves a process running in the background
+// to serve the selection. Without this it would keep the server port and client connections open
+// after the core exits, so a restarted server can't listen and clients never notice the disconnect.
+void closeInheritedDescriptors(QProcess &process)
+{
+  QProcess::UnixProcessParameters params;
+  params.flags = QProcess::UnixProcessFlag::CloseFileDescriptors;
+  process.setUnixProcessParameters(params);
+}
+
 } // namespace
 
 WlClipboardBridge::WlClipboardBridge(ChangedCallback onChanged, Commands commands)
@@ -118,6 +128,7 @@ void WlClipboardBridge::setData(const std::string &mime, const std::string &data
 
   const auto command = withMime(m_commands.copy, QString::fromStdString(mime));
   QProcess process;
+  closeInheritedDescriptors(process);
   // wl-copy forks a server that keeps serving the selection; don't keep pipes open to it.
   process.setStandardOutputFile(QProcess::nullDevice());
   process.setStandardErrorFile(QProcess::nullDevice());
@@ -142,6 +153,7 @@ void WlClipboardBridge::setData(const std::string &mime, const std::string &data
 QStringList WlClipboardBridge::listTypes() const
 {
   QProcess process;
+  closeInheritedDescriptors(process);
   process.setStandardErrorFile(QProcess::nullDevice());
   process.start(m_commands.list.first(), m_commands.list.mid(1));
   if (!process.waitForFinished(kProcessTimeoutMs)) {
@@ -162,6 +174,7 @@ std::string WlClipboardBridge::readMime(const QString &mime) const
 {
   const auto command = withMime(m_commands.paste, mime);
   QProcess process;
+  closeInheritedDescriptors(process);
   process.setStandardErrorFile(QProcess::nullDevice());
   process.start(command.first(), command.mid(1));
   if (!process.waitForFinished(kProcessTimeoutMs)) {
@@ -302,6 +315,7 @@ void WlClipboardBridge::handleChange()
 void WlClipboardBridge::watchLoop()
 {
   QProcess watcher;
+  closeInheritedDescriptors(watcher);
   watcher.setStandardErrorFile(QProcess::nullDevice());
   watcher.start(m_commands.watch.first(), m_commands.watch.mid(1));
   if (!watcher.waitForStarted(kProcessTimeoutMs)) {

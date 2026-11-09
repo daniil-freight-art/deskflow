@@ -21,6 +21,7 @@ private Q_SLOTS:
   void localChange_htmlAndText_callbackReceivesBothOnce();
   void setData_remoteHtml_writesClipboardWithoutCallback();
   void setData_sameRemoteAfterLocalCopy_writesAgain();
+  void setData_openDescriptor_notInheritedByCopy();
   void toClipboard_textHtmlPng_addsAllFormats();
   void toClipboard_utf16Html_convertsToUtf8();
   void fromClipboard_bitmapAndText_prefersPng();
