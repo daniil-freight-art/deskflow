@@ -20,6 +20,7 @@ private Q_SLOTS:
   void readData_noClipboard_returnsEmpty();
   void localChange_htmlAndText_callbackReceivesBothOnce();
   void setData_remoteHtml_writesClipboardWithoutCallback();
+  void setData_sameRemoteAfterLocalCopy_writesAgain();
   void toClipboard_textHtmlPng_addsAllFormats();
   void toClipboard_utf16Html_convertsToUtf8();
   void fromClipboard_bitmapAndText_prefersPng();

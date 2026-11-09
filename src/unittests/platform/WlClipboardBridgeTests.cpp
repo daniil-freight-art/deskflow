@@ -164,8 +164,32 @@ void WlClipboardBridgeTests::setData_remoteHtml_writesClipboardWithoutCallback()
   QCOMPARE(received.count(), size_t{0});
 }
 
+void WlClipboardBridgeTests::setData_sameRemoteAfterLocalCopy_writesAgain()
+{
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  copyLocally(dir.path(), {{QStringLiteral("text/plain;charset=utf-8"), "initial"}});
+
+  Received received;
+  WlClipboardBridge bridge(received.callback(), fakeCommands(dir.path()));
+  bridge.start();
+
+  bridge.setData(WlClipboardBridge::kMimeText, "remote");
+  copyLocally(dir.path(), {{QStringLiteral("text/plain;charset=utf-8"), "local"}});
+  QTRY_COMPARE_WITH_TIMEOUT(received.count(), size_t{1}, 3000);
+
+  // The local copy replaced the earlier remote write, so the same remote data must be written again.
+  bridge.setData(WlClipboardBridge::kMimeText, "remote");
+  bridge.stop();
+
+  QCOMPARE(bridge.readData().at(WlClipboardBridge::kMimeText), std::string{"remote"});
+}
+
 void WlClipboardBridgeTests::toClipboard_textHtmlPng_addsAllFormats()
 {
+#ifndef HAVE_LIBPORTAL_CLIPBOARD
+  QSKIP("png conversion needs libportal clipboard support");
+#endif
   EiClipboard clipboard(kClipboardClipboard);
   const WlClipboardBridge::MimeData data = {
       {WlClipboardBridge::kMimeText, "hi"},
@@ -207,6 +231,9 @@ void WlClipboardBridgeTests::toClipboard_utf16Html_convertsToUtf8()
 
 void WlClipboardBridgeTests::fromClipboard_bitmapAndText_prefersPng()
 {
+#ifndef HAVE_LIBPORTAL_CLIPBOARD
+  QSKIP("png conversion needs libportal clipboard support");
+#endif
   EiClipboard clipboard(kClipboardClipboard);
   clipboard.open(0);
   clipboard.empty();

@@ -96,6 +96,7 @@ private:
   QStringList listTypes() const;
   std::string readMime(const QString &mime) const;
   bool isOwnWrite(const MimeData &data) const;
+  void forgetWrite();
   void watchLoop();
   void handleChange();
 

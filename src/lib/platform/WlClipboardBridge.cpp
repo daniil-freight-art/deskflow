@@ -124,6 +124,7 @@ void WlClipboardBridge::setData(const std::string &mime, const std::string &data
   process.start(command.first(), command.mid(1));
   if (!process.waitForStarted(kProcessTimeoutMs)) {
     LOG_WARN("failed to start wl-copy: %s", qPrintable(process.errorString()));
+    forgetWrite();
     return;
   }
 
@@ -131,6 +132,7 @@ void WlClipboardBridge::setData(const std::string &mime, const std::string &data
   process.closeWriteChannel();
   if (!process.waitForFinished(kProcessTimeoutMs) || process.exitCode() != 0) {
     LOG_WARN("wl-copy did not finish successfully");
+    forgetWrite();
     return;
   }
 
@@ -258,6 +260,13 @@ std::pair<std::string, std::string> WlClipboardBridge::fromClipboard(const IClip
   return {};
 }
 
+void WlClipboardBridge::forgetWrite()
+{
+  std::scoped_lock lock{m_mutex};
+  m_lastWrittenMime.clear();
+  m_lastWrittenData.clear();
+}
+
 bool WlClipboardBridge::isOwnWrite(const MimeData &data) const
 {
   // wl-copy may add aliases (e.g. text/plain for text/html), so only compare what we wrote.
@@ -281,6 +290,9 @@ void WlClipboardBridge::handleChange()
     if (isOwnWrite(data)) {
       return;
     }
+    // A local copy replaced our write, so the same remote data must be written again next time.
+    m_lastWrittenMime.clear();
+    m_lastWrittenData.clear();
   }
 
   LOG_DEBUG("wayland clipboard changed, %zu formats", data.size());
