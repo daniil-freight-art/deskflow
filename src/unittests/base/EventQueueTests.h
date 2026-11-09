@@ -21,6 +21,8 @@ private Q_SLOTS:
   void dispatchEvent_noTypeHandler_dispatchesUnknownHandler();
   void dispatchEvent_handlerRemovesItself_keepsHandlerAliveUntilReturn();
   void waitForReady_loopSignalledBeforeWait_returns();
+  void loop_plainQuit_returnsSuccess();
+  void loop_quitWithExitData_returnsExitCode();
 
 private:
   Arch m_arch;

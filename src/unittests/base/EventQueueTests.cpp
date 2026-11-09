@@ -7,6 +7,7 @@
 #include "EventQueueTests.h"
 
 #include "base/EventQueue.h"
+#include "common/ExitCodes.h"
 
 #include <QTest>
 
@@ -62,6 +63,23 @@ void EventQueueTests::waitForReady_loopSignalledBeforeWait_returns()
   events.loop();
 
   events.waitForReady();
+}
+
+void EventQueueTests::loop_plainQuit_returnsSuccess()
+{
+  EventQueue events;
+  events.addEvent(Event(EventTypes::Quit));
+
+  QCOMPARE(events.loop(), s_exitSuccess);
+}
+
+void EventQueueTests::loop_quitWithExitData_returnsExitCode()
+{
+  // the gui restarts a core that exits with success, so fatal errors must quit with a failure code
+  EventQueue events;
+  events.addEvent(Event(EventTypes::Quit, nullptr, new ExitEventData(s_exitFailed)));
+
+  QCOMPARE(events.loop(), s_exitFailed);
 }
 
 QTEST_MAIN(EventQueueTests)

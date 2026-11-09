@@ -10,6 +10,7 @@
 
 #include "base/Log.h"
 #include "base/TMethodJob.h"
+#include "common/ExitCodes.h"
 #include "common/Settings.h"
 
 #ifdef HAVE_LIBPORTAL_CLIPBOARD
@@ -94,7 +95,7 @@ void PortalRemoteDesktop::handleSessionStarted(GObject *object, GAsyncResult *re
   if (!xdp_session_start_finish(session, res, &error)) {
     LOG_ERR("failed to start portal remote desktop session, quitting: %s", error->message);
     g_main_loop_quit(m_glibMainLoop);
-    m_events->addEvent(Event(EventTypes::Quit));
+    m_events->addEvent(Event(EventTypes::Quit, nullptr, new ExitEventData(s_exitFailed)));
     return;
   }
 
@@ -140,8 +141,9 @@ void PortalRemoteDesktop::handleSessionStarted(GObject *object, GAsyncResult *re
   auto fd = -1;
   fd = xdp_session_connect_to_eis(session, &error);
   if (fd < 0) {
+    LOG_ERR("failed to connect to eis, quitting: %s", error ? error->message : "unknown error");
     g_main_loop_quit(m_glibMainLoop);
-    m_events->addEvent(Event(EventTypes::Quit));
+    m_events->addEvent(Event(EventTypes::Quit, nullptr, new ExitEventData(s_exitFailed)));
     return;
   }
 
@@ -162,7 +164,7 @@ void PortalRemoteDesktop::handleInitSession(GObject *object, GAsyncResult *res)
     // fails.
     if (m_sessionIteration == 0) {
       g_main_loop_quit(m_glibMainLoop);
-      m_events->addEvent(Event(EventTypes::Quit));
+      m_events->addEvent(Event(EventTypes::Quit, nullptr, new ExitEventData(s_exitFailed)));
     } else {
       this->reconnect(1000);
     }

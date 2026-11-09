@@ -11,6 +11,7 @@
 #include "base/Event.h"
 #include "base/Log.h"
 #include "base/TMethodJob.h"
+#include "common/ExitCodes.h"
 #include "common/Settings.h"
 #include "deskflow/ClipboardTypes.h"
 #include "platform/EiClipboard.h"
@@ -243,7 +244,7 @@ void PortalInputCapture::handleSessionClosed(XdpSession *session)
 {
   LOG_ERR("portal input capture session was closed, exiting");
   g_main_loop_quit(m_glibMainLoop);
-  m_events->addEvent(Event(EventTypes::Quit));
+  m_events->addEvent(Event(EventTypes::Quit, nullptr, new ExitEventData(s_exitFailed)));
 
   g_signal_handler_disconnect(session, m_signals.at(Signal::SessionClosed));
   m_signals.at(Signal::SessionClosed) = 0;
@@ -318,7 +319,7 @@ void PortalInputCapture::setupSession(XdpInputCaptureSession *session)
   if (fd < 0) {
     LOG_ERR("failed to connect to eis: %s", error->message);
     g_main_loop_quit(m_glibMainLoop);
-    m_events->addEvent(Event(EventTypes::Quit));
+    m_events->addEvent(Event(EventTypes::Quit, nullptr, new ExitEventData(s_exitFailed)));
     return;
   }
 
@@ -350,7 +351,7 @@ void PortalInputCapture::handleInitSession(GObject *object, GAsyncResult *res)
   if (!session) {
     LOG_ERR("failed to initialize input capture session, quitting: %s", error->message);
     g_main_loop_quit(m_glibMainLoop);
-    m_events->addEvent(Event(EventTypes::Quit));
+    m_events->addEvent(Event(EventTypes::Quit, nullptr, new ExitEventData(s_exitFailed)));
     return;
   }
 
@@ -368,7 +369,7 @@ void PortalInputCapture::handleStart(GObject *object, GAsyncResult *res)
   if (!xdp_input_capture_session_start_finish(m_session, res, &error)) {
     LOG_ERR("failed to start input capture session, quitting: %s", error->message);
     g_main_loop_quit(m_glibMainLoop);
-    m_events->addEvent(Event(EventTypes::Quit));
+    m_events->addEvent(Event(EventTypes::Quit, nullptr, new ExitEventData(s_exitFailed)));
     return;
   }
 
@@ -602,7 +603,7 @@ gboolean PortalInputCapture::initSession()
     if (!session) {
       LOG_ERR("failed to initialize input capture session, quitting: %s", error->message);
       g_main_loop_quit(m_glibMainLoop);
-      m_events->addEvent(Event(EventTypes::Quit));
+      m_events->addEvent(Event(EventTypes::Quit, nullptr, new ExitEventData(s_exitFailed)));
       return FALSE;
     }
     m_session = session;
