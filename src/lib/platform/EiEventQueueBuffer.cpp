@@ -24,7 +24,7 @@ EiEventQueueBuffer::EiEventQueueBuffer(ei *ei, IEventQueue *events) : m_ei{ei_re
 {
   // We need a pipe to signal ourselves when addEvent() is called
   int pipefd[2];
-  int result = pipe2(pipefd, O_NONBLOCK);
+  int result = pipe2(pipefd, O_NONBLOCK | O_CLOEXEC);
   assert(result == 0);
 
   m_pipeRead = pipefd[0];

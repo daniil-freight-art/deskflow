@@ -104,6 +104,7 @@ private:
   const int *getUnblockPipe();
   const int *getUnblockPipeForThread(ArchThread);
   void setBlockingOnSocket(int fd, bool blocking) const;
+  void setCloseOnExec(int fd) const;
   [[noreturn]] void throwError(int) const override;
   [[noreturn]] void throwNameError(int) const override;
 

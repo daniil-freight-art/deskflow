@@ -73,11 +73,17 @@ void ArchNetworkBSD::init()
 ArchSocket ArchNetworkBSD::newSocket(AddressFamily family, SocketType type)
 {
   // create socket
-  int fd = socket(s_family[static_cast<int>(family)], s_type[static_cast<int>(type)], 0);
+  int socketType = s_type[static_cast<int>(type)];
+#if defined(SOCK_CLOEXEC)
+  // set atomically where possible, so a process spawned by another thread can't inherit it
+  socketType |= SOCK_CLOEXEC;
+#endif
+  int fd = socket(s_family[static_cast<int>(family)], socketType, 0);
   if (fd == -1) {
     throwError(errno);
   }
   try {
+    setCloseOnExec(fd);
     setBlockingOnSocket(fd, false);
 #if defined(__APPLE__)
     int on = 1;
@@ -185,7 +191,11 @@ ArchSocket ArchNetworkBSD::acceptSocket(ArchSocket s, ArchNetAddress *addr)
 
   // accept on socket
   auto len = ((*addr)->m_len);
+#if defined(__linux__)
+  int fd = accept4(s->m_fd, TYPED_ADDR(struct sockaddr, (*addr)), &len, SOCK_CLOEXEC);
+#else
   int fd = accept(s->m_fd, TYPED_ADDR(struct sockaddr, (*addr)), &len);
+#endif
   (*addr)->m_len = len;
   if (fd == -1) {
     int err = errno;
@@ -199,6 +209,7 @@ ArchSocket ArchNetworkBSD::acceptSocket(ArchSocket s, ArchNetAddress *addr)
   }
 
   try {
+    setCloseOnExec(fd);
     setBlockingOnSocket(fd, false);
 #if defined(__APPLE__)
     int on = 1;
@@ -378,6 +389,21 @@ void ArchNetworkBSD::throwErrorOnSocket(ArchSocket s)
   // throw if there's an error
   if (err != 0) {
     throwError(err);
+  }
+}
+
+void ArchNetworkBSD::setCloseOnExec(int fd) const
+{
+  assert(fd != -1);
+
+  // Processes started by the core (enter/exit commands, hotkey scripts) must not inherit
+  // sockets or pipes: a child holding the listen socket keeps the port bound after we exit.
+  const int flags = fcntl(fd, F_GETFD, 0);
+  if (flags == -1) {
+    throwError(errno);
+  }
+  if ((flags & FD_CLOEXEC) == 0 && fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == -1) {
+    throwError(errno);
   }
 }
 
@@ -713,9 +739,13 @@ const int *ArchNetworkBSD::getUnblockPipeForThread(ArchThread thread)
     unblockPipe = new int[2];
     if (pipe(unblockPipe) != -1) {
       try {
+        setCloseOnExec(unblockPipe[0]);
+        setCloseOnExec(unblockPipe[1]);
         setBlockingOnSocket(unblockPipe[0], false);
         mt->setNetworkDataForCurrentThread(unblockPipe);
       } catch (...) {
+        close(unblockPipe[0]);
+        close(unblockPipe[1]);
         delete[] unblockPipe;
         unblockPipe = nullptr;
       }

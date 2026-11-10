@@ -12,6 +12,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTest>
+#include <QtSystemDetection>
 
 #include <algorithm>
 #include <array>
@@ -22,6 +23,12 @@
 #include <mutex>
 #include <string>
 #include <vector>
+
+#if !defined(Q_OS_WIN)
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 
 namespace {
 using AddressFamily = IArchNetwork::AddressFamily;
@@ -479,6 +486,47 @@ private Q_SLOTS:
   {
     QVERIFY_THROWS_EXCEPTION(ArchNetworkSupportException, ARCH->setKeepAliveOnSocket(nullptr, true));
   }
+
+#if !defined(Q_OS_WIN)
+  // Processes started by the core must not inherit its sockets, or they keep the port bound.
+  void listenAndAcceptedSockets_areCloseOnExec()
+  {
+    const auto isCloseOnExec = [](int fd) {
+      const int flags = fcntl(fd, F_GETFD, 0);
+      return flags != -1 && (flags & FD_CLOEXEC) != 0;
+    };
+
+    Socket listener(ARCH->newSocket(AddressFamily::INet6, IArchNetwork::SocketType::Stream));
+    QVERIFY(isCloseOnExec(listener->m_fd));
+
+    NumericAddresses addresses("::1");
+    QVERIFY(!addresses.get().empty());
+    auto address = addresses.get().front();
+    ARCH->setAddrPort(address, 0);
+    ARCH->bindSocket(listener.get(), address);
+    ARCH->listenOnSocket(listener.get());
+
+    sockaddr_in6 bound{};
+    socklen_t boundLength = sizeof(bound);
+    QCOMPARE(getsockname(listener->m_fd, reinterpret_cast<sockaddr *>(&bound), &boundLength), 0);
+
+    QTcpSocket client;
+    client.setProxy(QNetworkProxy::NoProxy);
+    client.connectToHost(QHostAddress::LocalHostIPv6, ntohs(bound.sin6_port));
+
+    Socket accepted;
+    QVERIFY(
+        QTest::qWaitFor(
+            [&] {
+              accepted.reset(ARCH->acceptSocket(listener.get(), nullptr));
+              return accepted != nullptr;
+            },
+            kTimeoutMs
+        )
+    );
+    QVERIFY(isCloseOnExec(accepted->m_fd));
+  }
+#endif
 
   void unblockPollSocket_wakesPollingThread()
   {
