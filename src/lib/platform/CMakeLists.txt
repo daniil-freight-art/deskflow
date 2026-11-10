@@ -19,6 +19,15 @@ if(UNIX AND NOT APPLE)
   pkg_check_modules(LIBPORTAL REQUIRED QUIET "libportal >= ${REQUIRED_LIBPORTAL_VERSION}")
   message(STATUS "libportal version: ${LIBPORTAL_VERSION}")
 
+  # Clipboard sharing through the Wayland data-control protocols, for
+  # compositors whose portal has no clipboard (Hyprland, Sway, ...)
+  pkg_check_modules(WAYLAND_CLIENT QUIET "wayland-client >= 1.20")
+  if(WAYLAND_CLIENT_FOUND)
+    message(STATUS "wayland-client version: ${WAYLAND_CLIENT_VERSION}")
+  else()
+    message(WARNING "wayland-client not found, clipboard sharing will only work through the desktop portal")
+  endif()
+
   # Check if we have the restore ability in the IC portal
   include(CMakePushCheckState)
   include(CheckSymbolExists)
@@ -162,6 +171,12 @@ elseif(UNIX)
       EiKeyState.cpp
       EiKeyState.h
     )
+    if(WAYLAND_CLIENT_FOUND)
+      list(APPEND PLATFORM_SOURCES
+        WlDataControlClipboard.cpp
+        WlDataControlClipboard.h
+      )
+    endif()
     # The Portal sources also require EI.
     if(LIBPORTAL_FOUND)
       list(APPEND PLATFORM_SOURCES
@@ -210,6 +225,11 @@ if(UNIX)
     endif()
     if (HAVE_LP_SHORTCUTS)
       target_compile_definitions(platform PUBLIC HAVE_LIBPORTAL_SHORTCUTS)
+    endif()
+    if (LIBEI_FOUND AND WAYLAND_CLIENT_FOUND)
+      target_compile_definitions(platform PUBLIC HAVE_WAYLAND_DATA_CONTROL)
+      target_include_directories(platform PRIVATE ${WAYLAND_CLIENT_INCLUDE_DIRS})
+      target_link_libraries(platform PRIVATE ${WAYLAND_CLIENT_LINK_LIBRARIES})
     endif()
     target_include_directories(platform
       PUBLIC

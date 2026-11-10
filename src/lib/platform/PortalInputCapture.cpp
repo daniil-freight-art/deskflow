@@ -169,9 +169,10 @@ bool PortalInputCapture::getClosestReleaseBarrier(
   return bestDistance != std::numeric_limits<int>::max();
 }
 
-PortalInputCapture::PortalInputCapture(EiComputer *computer, IEventQueue *events)
+PortalInputCapture::PortalInputCapture(EiComputer *computer, IEventQueue *events, bool useClipboard)
     : m_computer{computer},
       m_events{events},
+      m_useClipboard{useClipboard},
       m_portalVersion(0),
       m_portal{xdp_portal_new()}
 {
@@ -207,13 +208,12 @@ PortalInputCapture::~PortalInputCapture()
     XdpSession *parentSession = xdp_input_capture_session_get_session(m_session);
     if (m_signals.at(SessionClosed) != 0)
       g_signal_handler_disconnect(parentSession, m_signals.at(SessionClosed));
-    g_signal_handler_disconnect(m_session, m_signals.at(Disabled));
-    g_signal_handler_disconnect(m_session, m_signals.at(Activated));
-    g_signal_handler_disconnect(m_session, m_signals.at(Deactivated));
-    g_signal_handler_disconnect(m_session, m_signals.at(ZonesChanged));
-#ifdef HAVE_LIBPORTAL_CLIPBOARD
-    g_signal_handler_disconnect(parentSession, m_signals.at(SelectionTransfer));
-#endif
+    for (const auto signal : {Disabled, Activated, Deactivated, ZonesChanged}) {
+      if (m_signals.at(signal) != 0)
+        g_signal_handler_disconnect(m_session, m_signals.at(signal));
+    }
+    if (m_signals.at(SelectionTransfer) != 0)
+      g_signal_handler_disconnect(parentSession, m_signals.at(SelectionTransfer));
     g_object_unref(m_session);
   }
 
@@ -297,7 +297,7 @@ void PortalInputCapture::setupSession(XdpInputCaptureSession *session)
   XdpSession *parentSession = xdp_input_capture_session_get_session(session);
 
 #ifdef HAVE_LIBPORTAL_CLIPBOARD
-  if (!xdp_session_is_clipboard_enabled(parentSession) && m_portalVersion > 1) {
+  if (m_useClipboard && !xdp_session_is_clipboard_enabled(parentSession) && m_portalVersion > 1) {
     if (Settings::value(Settings::Server::XdpClipboardRetried).toBool()) {
       // some backends never report clipboard enabled even when granted; don't loop forever
       LOG_DEBUG("clipboard still not enabled on session after one retry, continuing without it");
@@ -336,8 +336,10 @@ void PortalInputCapture::setupSession(XdpInputCaptureSession *session)
   handleZonesChanged(session, nullptr);
 
 #ifdef HAVE_LIBPORTAL_CLIPBOARD
-  m_signals.at(SelectionTransfer) =
-      g_signal_connect(G_OBJECT(parentSession), "selection-transfer", G_CALLBACK(selectionTransfer), this);
+  if (m_useClipboard) {
+    m_signals.at(SelectionTransfer) =
+        g_signal_connect(G_OBJECT(parentSession), "selection-transfer", G_CALLBACK(selectionTransfer), this);
+  }
 #endif
 }
 
@@ -607,7 +609,9 @@ gboolean PortalInputCapture::initSession()
       return FALSE;
     }
     m_session = session;
-    xdp_session_request_clipboard(xdp_input_capture_session_get_session(session));
+    if (m_useClipboard) {
+      xdp_session_request_clipboard(xdp_input_capture_session_get_session(session));
+    }
     xdp_input_capture_session_set_session_persistence(session, XDP_INPUT_CAPTURE_SESSION_PERSISTENCE_PERSISTENT);
     if (auto sessionToken = Settings::value(Settings::Server::XdpRestoreToken).toByteArray(); !sessionToken.isEmpty()) {
       xdp_input_capture_session_set_restore_token(session, strdup(sessionToken.data()));
@@ -741,7 +745,9 @@ void PortalInputCapture::handleActivated(
   m_isActive = true;
 
 #ifdef HAVE_LIBPORTAL_CLIPBOARD
-  if (m_session) {
+  if (!m_useClipboard) {
+    // the clipboard is shared through Wayland data control, not the portal
+  } else if (m_session) {
     LOG_DEBUG("reading clipboard selection on activation");
     m_computer->sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardClipboard);
 

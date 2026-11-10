@@ -20,7 +20,9 @@ namespace deskflow {
 class PortalRemoteDesktop
 {
 public:
-  PortalRemoteDesktop(EiComputer *computer, IEventQueue *events);
+  // useClipboard: share the clipboard through the portal, false when the
+  // clipboard is shared another way (Wayland data control)
+  PortalRemoteDesktop(EiComputer *computer, IEventQueue *events, bool useClipboard = true);
   ~PortalRemoteDesktop();
 
   void claimClipboard() const;
@@ -54,6 +56,7 @@ private:
 private:
   EiComputer *m_computer;
   IEventQueue *m_events;
+  bool m_useClipboard = true;
 
   Thread *m_glibThread;
   GMainLoop *m_glibMainLoop = nullptr;

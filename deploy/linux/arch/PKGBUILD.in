@@ -35,6 +35,7 @@ depends=(
   qt6-base
   qt6-svg
   qt6-translations
+  wayland
 )
 
 options=('!debug')

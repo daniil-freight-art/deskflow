@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
@@ -57,18 +58,24 @@ EiComputer::EiComputer(bool isPrimary, IEventQueue *events, bool usePortal)
 {
   initEi();
   m_keyState = new EiKeyState(this, events);
+  // Local clipboard cache, used unless the portal input capture manages the clipboard
+  m_clipboard = new EiClipboard(kClipboardClipboard);
   // install event handlers
   m_events->addHandler(EventTypes::System, m_events->getSystemTarget(), [this](const auto &e) {
     handleSystemEvent(e);
   });
+
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  setupWaylandClipboard();
+#endif
 
   if (usePortal) {
     m_events->addHandler(EventTypes::EIConnected, getEventTarget(), [this](const auto &e) {
       handleConnectedToEisEvent(e);
     });
     if (isPrimary) {
-      // Portal input capture manages its own clipboard
-      m_portalInputCapture = new PortalInputCapture(this, m_events);
+      // Portal input capture manages its own clipboard, unless data control is used
+      m_portalInputCapture = new PortalInputCapture(this, m_events, usePortalClipboard());
 #ifdef HAVE_LIBPORTAL_SHORTCUTS
       m_portalGlobalShortcuts = new PortalGlobalShortcuts(this, m_events);
 #endif
@@ -76,9 +83,7 @@ EiComputer::EiComputer(bool isPrimary, IEventQueue *events, bool usePortal)
       m_events->addHandler(EventTypes::EISessionClosed, getEventTarget(), [this](const auto &) {
         handlePortalSessionClosed();
       });
-      m_portalRemoteDesktop = new PortalRemoteDesktop(this, m_events);
-      // Create clipboard for remote desktop (secondary computer)
-      m_clipboard = new EiClipboard(kClipboardClipboard);
+      m_portalRemoteDesktop = new PortalRemoteDesktop(this, m_events, usePortalClipboard());
     }
   } else {
     // Note: socket backend does not support reconnections
@@ -86,8 +91,6 @@ EiComputer::EiComputer(bool isPrimary, IEventQueue *events, bool usePortal)
       LOG_ERR("ei init error: %s", strerror(-rc));
       throw std::runtime_error("failed to init ei context");
     }
-    // Create clipboard for socket backend
-    m_clipboard = new EiClipboard(kClipboardClipboard);
   }
 
   // disable sleep if the flag is set
@@ -98,6 +101,12 @@ EiComputer::EiComputer(bool isPrimary, IEventQueue *events, bool usePortal)
 
 EiComputer::~EiComputer()
 {
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  // stop the worker thread first, so it can't post events for a computer that's gone
+  m_wlClipboard.reset();
+  m_events->removeHandler(EventTypes::WaylandClipboardChanged, getEventTarget());
+#endif
+
   m_events->adoptBuffer(nullptr);
   m_events->removeHandler(EventTypes::System, m_events->getSystemTarget());
 
@@ -185,6 +194,17 @@ void *EiComputer::getEventTarget() const
 
 bool EiComputer::getClipboard(ClipboardID id, IClipboard *clipboard) const
 {
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  // The data-control clipboard lands local selections in m_clipboard.
+  // Only the regular clipboard is shared, not the primary selection.
+  if (m_wlClipboard) {
+    if (id != kClipboardClipboard) {
+      return false;
+    }
+    return IClipboard::copy(clipboard, m_clipboard);
+  }
+#endif
+
   // If using portal input capture, get clipboard from there
   if (m_portalInputCapture) {
     const auto sourceClipboard = m_portalInputCapture->getClipboard(id);
@@ -489,6 +509,12 @@ void EiComputer::leave()
 
 bool EiComputer::setClipboard(ClipboardID id, const IClipboard *clipboard)
 {
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  if (m_wlClipboard) {
+    return setWaylandClipboard(id, clipboard);
+  }
+#endif
+
   if (!clipboard) {
     return false;
   }
@@ -540,22 +566,208 @@ void EiComputer::screensaver(bool activate)
 
 void EiComputer::resetOptions()
 {
-  // Should reset options to neutral, see setOptions().
-  // We don't have ei-specific options, nothing to do here
+  // Reset options to neutral, see setOptions()
+  m_clipboardSharing = true;
+  m_maximumClipboardSize = INT_MAX;
+
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  if (m_wlClipboard) {
+    m_wlClipboard->setMaxBytes(clipboardLimitBytes());
+  }
+#endif
 }
 
 void EiComputer::setOptions(const OptionsList &options)
 {
-  for (auto it = options.begin(); it != options.end(); ++it) {
-    if (*it == kOptionClipboardSharingSize) {
-      ++it;
-      if (it == options.end())
-        break;
-      m_maximumClipboardSize = *it;
+  // options come in (id, value) pairs
+  for (std::size_t i = 0; i + 1 < options.size(); i += 2) {
+    const auto id = options[i];
+    const auto value = options[i + 1];
+    if (id == kOptionClipboardSharing) {
+      m_clipboardSharing = value != 0;
+      LOG_DEBUG("computer received clipboard sharing: %s", m_clipboardSharing ? "on" : "off");
+    } else if (id == kOptionClipboardSharingSize) {
+      m_maximumClipboardSize = value;
       LOG_DEBUG("computer received clipboard size limit: %zu KB", m_maximumClipboardSize);
     }
   }
+
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  if (m_wlClipboard) {
+    m_wlClipboard->setMaxBytes(clipboardLimitBytes());
+  }
+#endif
 }
+
+std::size_t EiComputer::clipboardLimitBytes() const
+{
+  if (!m_clipboardSharing) {
+    return 0;
+  }
+  constexpr std::size_t maxKilobytes = SIZE_MAX / 1024;
+  return std::min(m_maximumClipboardSize, maxKilobytes) * 1024;
+}
+
+bool EiComputer::usePortalClipboard() const
+{
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  return !m_wlClipboard;
+#else
+  return true;
+#endif
+}
+
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+
+void EiComputer::setupWaylandClipboard()
+{
+  const auto config = WlDataControlClipboard::configFromEnvironment();
+  if (config.mode == WlDataControlClipboard::Mode::Disabled) {
+    LOG_INFO("wayland data-control clipboard disabled by %s", WlDataControlClipboard::kEnvironmentVariable);
+    return;
+  }
+
+  m_events->addHandler(EventTypes::WaylandClipboardChanged, getEventTarget(), [this](const auto &) {
+    handleWaylandClipboardChanged();
+  });
+
+  // The server shares what was copied before it started. A client only
+  // shares what is copied after it started, as it isn't connected yet.
+  m_wlClipboard = WlDataControlClipboard::create(
+      [this](WlDataControlClipboard::Formats formats, std::uint64_t serial) {
+        onWaylandSelection(std::move(formats), serial);
+      },
+      clipboardLimitBytes(), config.protocol, m_isPrimary
+  );
+
+  if (!m_wlClipboard) {
+    m_events->removeHandler(EventTypes::WaylandClipboardChanged, getEventTarget());
+    if (config.mode == WlDataControlClipboard::Mode::Enabled) {
+      LOG_WARN("wayland data-control clipboard is not available, using the portal clipboard");
+    } else {
+      LOG_INFO("wayland data-control clipboard is not available, using the portal clipboard");
+    }
+    return;
+  }
+
+  LOG_INFO("sharing the clipboard through %s", m_wlClipboard->protocolName());
+
+  // Selections reported before the event loop runs are picked up by this event
+  {
+    std::scoped_lock lock{m_wlMutex};
+    m_wlEventPosted = true;
+  }
+  m_events->addEvent(Event(EventTypes::WaylandClipboardChanged, getEventTarget()));
+}
+
+void EiComputer::onWaylandSelection(WlDataControlClipboard::Formats formats, std::uint64_t serial)
+{
+  // Runs on the data-control worker thread. Only the newest selection is kept,
+  // and at most one event is queued for it. Events are only posted once the
+  // event loop is running, because the queue isn't thread-safe before that.
+  bool post = false;
+  {
+    std::scoped_lock lock{m_wlMutex};
+    m_wlPendingSelection = WaylandSelection{std::move(formats), serial};
+    if (m_wlEventLoopRunning && !m_wlEventPosted) {
+      m_wlEventPosted = true;
+      post = true;
+    }
+  }
+
+  if (post) {
+    m_events->addEvent(Event(EventTypes::WaylandClipboardChanged, getEventTarget()));
+  }
+}
+
+void EiComputer::handleWaylandClipboardChanged()
+{
+  std::optional<WaylandSelection> selection;
+  {
+    std::scoped_lock lock{m_wlMutex};
+    m_wlEventLoopRunning = true;
+    m_wlEventPosted = false;
+    selection.swap(m_wlPendingSelection);
+  }
+
+  if (!selection || !m_wlClipboard) {
+    return;
+  }
+
+  if (!m_wlClipboard->isCurrent(selection->serial)) {
+    LOG_DEBUG("ignoring local clipboard change, the clipboard changed again since");
+    return;
+  }
+
+  const auto limit = clipboardLimitBytes();
+  if (limit == 0) {
+    LOG_DEBUG("clipboard sharing is disabled, not sharing local clipboard change");
+    return;
+  }
+
+  // The selection may have been read before the server sent its size limit
+  auto &formats = selection->formats;
+  for (const auto format : WlDataControlClipboard::fitToLimit(formats, limit)) {
+    LOG_WARN(
+        "not sharing clipboard %s, it exceeds the limit of %zu KB",
+        format == IClipboard::Format::Text   ? "text"
+        : format == IClipboard::Format::HTML ? "html"
+                                             : "image",
+        m_maximumClipboardSize
+    );
+  }
+
+  if (std::ranges::none_of(formats, [](const auto &data) { return data.has_value(); })) {
+    LOG_DEBUG("local clipboard change has nothing to share");
+    return;
+  }
+
+  m_clipboard->open(0);
+  m_clipboard->empty();
+  for (std::size_t index = 0; index < formats.size(); ++index) {
+    if (formats[index]) {
+      m_clipboard->add(static_cast<IClipboard::Format>(index), *formats[index]);
+    }
+  }
+  m_clipboard->close();
+
+  LOG_DEBUG("local clipboard changed, sharing it");
+  sendClipboardEvent(EventTypes::ClipboardGrabbed, kClipboardClipboard);
+}
+
+bool EiComputer::setWaylandClipboard(ClipboardID id, const IClipboard *clipboard)
+{
+  // Only the regular clipboard is shared, not the primary selection
+  if (id != kClipboardClipboard) {
+    return false;
+  }
+
+  // Another computer took the clipboard, its data follows later
+  if (!clipboard) {
+    m_wlClipboard->forgetSelection();
+    return true;
+  }
+
+  if (!IClipboard::copy(m_clipboard, clipboard)) {
+    return false;
+  }
+
+  WlDataControlClipboard::Formats formats;
+  if (m_clipboard->open(0)) {
+    for (std::size_t index = 0; index < formats.size(); ++index) {
+      const auto format = static_cast<IClipboard::Format>(index);
+      if (m_clipboard->has(format)) {
+        formats[index] = m_clipboard->get(format);
+      }
+    }
+    m_clipboard->close();
+  }
+
+  m_wlClipboard->setSelection(formats);
+  return true;
+}
+
+#endif // HAVE_WAYLAND_DATA_CONTROL
 
 bool EiComputer::isPrimary() const
 {
@@ -934,6 +1146,13 @@ void EiComputer::handlePortalSessionClosed()
   LOG_DEBUG("eis handling portal session closed");
   cleanupEi();
   initEi();
+
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  // initEi() discarded the queued events, which may include ours
+  if (m_wlClipboard) {
+    handleWaylandClipboardChanged();
+  }
+#endif
 }
 
 void EiComputer::handleSystemEvent(const Event &)
@@ -994,7 +1213,7 @@ void EiComputer::handleSystemEvent(const Event &)
             m_portalInputCapture->release();
           }
           delete m_portalInputCapture;
-          m_portalInputCapture = new PortalInputCapture(this, this->m_events);
+          m_portalInputCapture = new PortalInputCapture(this, this->m_events, usePortalClipboard());
         }
       }
       this->handlePortalSessionClosed();

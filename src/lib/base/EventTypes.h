@@ -238,5 +238,8 @@ enum class EventTypes : uint32_t
 
   /// Stop libei
   EISessionClosed,
+
+  /// The Wayland data-control clipboard changed
+  WaylandClipboardChanged,
 };
 } // namespace deskflow

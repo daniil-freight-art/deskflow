@@ -14,12 +14,17 @@
 #include "platform/PortalGlobalShortcuts.h"
 #endif
 #include "platform/XDGPowerManager.h"
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+#include "platform/WlDataControlClipboard.h"
+#endif
 
 #include <bitset>
 #include <climits>
 #include <libei.h>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 struct ei;
@@ -139,6 +144,20 @@ private:
   void cancelIdleEmulationTimer() const;
   void updatePortalGlobalShortcuts();
 
+  // clipboard limit set by the server, in bytes, 0 when sharing is disabled
+  std::size_t clipboardLimitBytes() const;
+  // false when the Wayland data-control clipboard is used instead
+  bool usePortalClipboard() const;
+
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  // Wayland data-control clipboard, used instead of the portal clipboard
+  // when the compositor supports it (e.g. Hyprland and Sway)
+  void setupWaylandClipboard();
+  void onWaylandSelection(WlDataControlClipboard::Formats formats, std::uint64_t serial);
+  void handleWaylandClipboardChanged();
+  bool setWaylandClipboard(ClipboardID id, const IClipboard *clipboard);
+#endif
+
   static void handleEiLogEvent(ei *ei, const ei_log_priority priority, const char *message, ei_log_context *)
   {
     auto computer = static_cast<EiComputer *>(ei_get_user_data(ei));
@@ -161,6 +180,23 @@ private:
   // clipboard stuff
   EiClipboard *m_clipboard = nullptr;
   size_t m_maximumClipboardSize = INT_MAX;
+  bool m_clipboardSharing = true;
+
+#ifdef HAVE_WAYLAND_DATA_CONTROL
+  struct WaylandSelection
+  {
+    WlDataControlClipboard::Formats formats;
+    std::uint64_t serial = 0;
+  };
+
+  std::unique_ptr<WlDataControlClipboard> m_wlClipboard;
+  // Guards the members below, which are shared with the clipboard's worker thread.
+  // The worker stores the newest selection and posts at most one event for it.
+  std::mutex m_wlMutex;
+  std::optional<WaylandSelection> m_wlPendingSelection;
+  bool m_wlEventLoopRunning = false;
+  bool m_wlEventPosted = false;
+#endif
 
   std::vector<ei_device *> m_eiDevices;
 

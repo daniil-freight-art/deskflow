@@ -29,7 +29,9 @@ class EiClipboard;
 class PortalInputCapture
 {
 public:
-  PortalInputCapture(EiComputer *computer, IEventQueue *events);
+  // useClipboard: share the clipboard through the portal, false when the
+  // clipboard is shared another way (Wayland data control)
+  PortalInputCapture(EiComputer *computer, IEventQueue *events, bool useClipboard = true);
   ~PortalInputCapture();
 
   // Get the clipboard for the specified ID
@@ -149,6 +151,7 @@ private:
 
   EiComputer *m_computer = nullptr;
   IEventQueue *m_events = nullptr;
+  bool m_useClipboard = true;
   int m_portalVersion = 0;
 
   Thread *m_glibThread;
